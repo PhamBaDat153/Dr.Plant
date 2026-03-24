@@ -44,6 +44,22 @@
             android:textColor="#1f2937"
             android:textSize="18sp"
             android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/multiSelectButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end|center_vertical"
+            android:backgroundTint="@android:color/transparent"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:paddingStart="8dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="4dp"
+            android:text="@string/history_multi_select"
+            android:textColor="#2563eb"
+            android:textSize="12sp" />
     </FrameLayout>
 
     <View
@@ -81,6 +97,61 @@
             android:layout_marginStart="12dp"
             android:text="@string/history_filter_coffee" />
     </RadioGroup>
+
+    <LinearLayout
+        android:id="@+id/selectionActionsLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="16dp"
+        android:background="#eff6ff"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/selectionCountText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/history_selection_count_zero"
+            android:textColor="#1e3a8a"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/selectAllButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:backgroundTint="#dbeafe"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:paddingStart="10dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="6dp"
+            android:text="@string/history_select_all"
+            android:textColor="#1d4ed8"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/deleteSelectedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:backgroundTint="#dc2626"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:paddingStart="10dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="6dp"
+            android:text="@string/history_delete_selected"
+            android:textColor="@android:color/white"
+            android:textSize="12sp" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/emptyHistoryText"

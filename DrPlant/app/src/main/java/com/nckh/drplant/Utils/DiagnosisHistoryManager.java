@@ -15,8 +15,10 @@ import com.nckh.drplant.Models.DiagnosisResponse;
 import java.lang.reflect.Type;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 public final class DiagnosisHistoryManager {
 
@@ -101,6 +103,61 @@ public final class DiagnosisHistoryManager {
             }
         }
         return filteredItems;
+    }
+
+    // Xóa một mục chẩn đoán khỏi lịch sử đã lưu dựa trên id và trả về kết quả thao tác.
+    public static boolean removeHistoryItem(@NonNull Context context, @Nullable String historyItemId) {
+        if (TextUtils.isEmpty(historyItemId)) {
+            return false;
+        }
+
+        List<DiagnosisHistoryItem> historyItems = getHistoryItems(context);
+        boolean removed = false;
+        for (int index = historyItems.size() - 1; index >= 0; index--) {
+            DiagnosisHistoryItem item = historyItems.get(index);
+            if (item != null && historyItemId.equals(item.id)) {
+                historyItems.remove(index);
+                removed = true;
+                break;
+            }
+        }
+
+        if (removed) {
+            saveHistoryItems(context, historyItems);
+        }
+        return removed;
+    }
+
+    // Xóa nhiều mục chẩn đoán khỏi lịch sử đã lưu dựa trên danh sách id và trả về số lượng đã xóa.
+    public static int removeHistoryItems(@NonNull Context context, @NonNull List<String> historyItemIds) {
+        if (historyItemIds.isEmpty()) {
+            return 0;
+        }
+
+        Set<String> idSet = new HashSet<>();
+        for (String historyItemId : historyItemIds) {
+            if (!TextUtils.isEmpty(historyItemId)) {
+                idSet.add(historyItemId);
+            }
+        }
+        if (idSet.isEmpty()) {
+            return 0;
+        }
+
+        List<DiagnosisHistoryItem> historyItems = getHistoryItems(context);
+        int removedCount = 0;
+        for (int index = historyItems.size() - 1; index >= 0; index--) {
+            DiagnosisHistoryItem item = historyItems.get(index);
+            if (item != null && idSet.contains(item.id)) {
+                historyItems.remove(index);
+                removedCount++;
+            }
+        }
+
+        if (removedCount > 0) {
+            saveHistoryItems(context, historyItems);
+        }
+        return removedCount;
     }
 
     @NonNull

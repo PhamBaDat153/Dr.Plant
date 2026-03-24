@@ -1,18 +1,27 @@
 package com.nckh.drplant;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
+import android.media.ExifInterface;
 import android.os.Bundle;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.Button;
+import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.RadioGroup;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -25,18 +34,30 @@ import com.nckh.drplant.Utils.DiagnosisHistoryManager;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 public class HistoryActivity extends AppCompatActivity {
 
+    private static final String TAG = "HistoryActivity";
+    private static final int THUMBNAIL_REQUIRED_WIDTH = 240;
+    private static final int THUMBNAIL_REQUIRED_HEIGHT = 240;
+
     private final List<DiagnosisHistoryItem> allHistoryItems = new ArrayList<>();
     private final List<DiagnosisHistoryItem> visibleHistoryItems = new ArrayList<>();
+    private final Set<String> selectedHistoryIds = new HashSet<>();
 
     private RadioGroup filterGroup;
-    private ListView historyListView;
     private TextView emptyHistoryText;
     private HistoryAdapter historyAdapter;
+    private Button multiSelectButton;
+    private View selectionActionsLayout;
+    private TextView selectionCountText;
+    private Button selectAllButton;
+    private Button deleteSelectedButton;
+    private boolean selectionModeEnabled;
 
     // Khởi tạo màn hình lịch sử, ánh xạ view và gán sự kiện cho bộ lọc cùng danh sách.
     @Override
@@ -55,15 +76,40 @@ public class HistoryActivity extends AppCompatActivity {
         backButton.setOnClickListener(v -> finish());
 
         filterGroup = findViewById(R.id.filterGroup);
-        historyListView = findViewById(R.id.historyListView);
+        ListView historyListView = findViewById(R.id.historyListView);
         emptyHistoryText = findViewById(R.id.emptyHistoryText);
+        multiSelectButton = findViewById(R.id.multiSelectButton);
+        selectionActionsLayout = findViewById(R.id.selectionActionsLayout);
+        selectionCountText = findViewById(R.id.selectionCountText);
+        selectAllButton = findViewById(R.id.selectAllButton);
+        deleteSelectedButton = findViewById(R.id.deleteSelectedButton);
         historyListView.setEmptyView(emptyHistoryText);
 
         historyAdapter = new HistoryAdapter();
         historyListView.setAdapter(historyAdapter);
-        historyListView.setOnItemClickListener((parent, view, position, id) -> openHistoryItem(position));
+        historyListView.setOnItemClickListener((parent, view, position, id) -> handleHistoryItemClick(position));
+        historyListView.setOnItemLongClickListener((parent, view, position, id) -> {
+            if (position < 0 || position >= visibleHistoryItems.size()) {
+                return false;
+            }
+            if (!selectionModeEnabled) {
+                enterSelectionMode();
+            }
+            toggleHistoryItemSelection(visibleHistoryItems.get(position));
+            return true;
+        });
 
-        filterGroup.setOnCheckedChangeListener((group, checkedId) -> applySelectedFilter());
+        multiSelectButton.setOnClickListener(v -> toggleSelectionMode());
+        selectAllButton.setOnClickListener(v -> toggleSelectAllVisibleItems());
+        deleteSelectedButton.setOnClickListener(v -> confirmDeleteSelectedItems());
+
+        filterGroup.setOnCheckedChangeListener((group, checkedId) -> {
+            if (selectionModeEnabled) {
+                exitSelectionMode();
+            }
+            applySelectedFilter();
+        });
+        updateSelectionUi();
     }
 
     // Tải lại dữ liệu lịch sử mỗi khi quay lại màn hình để đảm bảo danh sách luôn mới nhất.
@@ -96,7 +142,22 @@ public class HistoryActivity extends AppCompatActivity {
 
         visibleHistoryItems.clear();
         visibleHistoryItems.addAll(DiagnosisHistoryManager.filterHistory(allHistoryItems, filter));
+        syncSelectionWithCurrentData();
+        updateSelectionUi();
         historyAdapter.notifyDataSetChanged();
+    }
+
+    // Xử lý thao tác chạm vào một mục: mở chi tiết hoặc chọn bỏ chọn khi đang ở chế độ chọn nhiều.
+    private void handleHistoryItemClick(int position) {
+        if (position < 0 || position >= visibleHistoryItems.size()) {
+            return;
+        }
+
+        if (selectionModeEnabled) {
+            toggleHistoryItemSelection(visibleHistoryItems.get(position));
+            return;
+        }
+        openHistoryItem(position);
     }
 
     // Mở lại màn hình chi tiết chẩn đoán khi người dùng chọn một phần tử trong lịch sử.
@@ -178,23 +239,359 @@ public class HistoryActivity extends AppCompatActivity {
                     )
             );
             viewHolder.timeText.setText(dateFormat.format(new Date(historyItem.viewedAt)));
+            bindThumbnail(viewHolder.thumbnailImage, historyItem.imagePath);
+
+            boolean itemSelected = isHistoryItemSelected(historyItem);
+            viewHolder.itemRoot.setBackgroundColor(itemSelected ? 0xFFDCEFFE : 0xFFF9FAFB);
+            viewHolder.selectionCheckBox.setVisibility(selectionModeEnabled ? View.VISIBLE : View.GONE);
+            viewHolder.selectionCheckBox.setChecked(itemSelected);
+            viewHolder.selectionCheckBox.setOnClickListener(v -> toggleHistoryItemSelection(historyItem));
+            viewHolder.deleteButton.setVisibility(selectionModeEnabled ? View.GONE : View.VISIBLE);
+            viewHolder.deleteButton.setOnClickListener(v -> confirmDeleteHistoryItem(historyItem));
         }
     }
 
     // ViewHolder giúp giữ tham chiếu các view con để tái sử dụng item hiệu quả hơn.
     private static class ViewHolder {
+        final View itemRoot;
+        final android.widget.CheckBox selectionCheckBox;
+        final ImageView thumbnailImage;
         final TextView titleText;
         final TextView subtitleText;
         final TextView confidenceText;
         final TextView timeText;
+        final ImageButton deleteButton;
 
         // Ánh xạ các thành phần hiển thị bên trong một item lịch sử.
         ViewHolder(@NonNull View rootView) {
+            itemRoot = rootView.findViewById(R.id.itemRoot);
+            selectionCheckBox = rootView.findViewById(R.id.selectionCheckBox);
+            thumbnailImage = rootView.findViewById(R.id.thumbnailImage);
             titleText = rootView.findViewById(R.id.titleText);
             subtitleText = rootView.findViewById(R.id.subtitleText);
             confidenceText = rootView.findViewById(R.id.confidenceText);
             timeText = rootView.findViewById(R.id.timeText);
+            deleteButton = rootView.findViewById(R.id.deleteButton);
         }
+    }
+
+    // Chuyển đổi giữa chế độ xem thông thường và chế độ chọn nhiều mục trong lịch sử.
+    private void toggleSelectionMode() {
+        if (selectionModeEnabled) {
+            exitSelectionMode();
+            return;
+        }
+        enterSelectionMode();
+    }
+
+    // Bật chế độ chọn nhiều để người dùng có thể chọn nhiều chẩn đoán cần xóa cùng lúc.
+    private void enterSelectionMode() {
+        if (visibleHistoryItems.isEmpty()) {
+            Toast.makeText(this, R.string.history_multi_select_empty, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        selectionModeEnabled = true;
+        selectedHistoryIds.clear();
+        updateSelectionUi();
+        historyAdapter.notifyDataSetChanged();
+    }
+
+    // Tắt chế độ chọn nhiều, xóa các mục đang chọn và đưa giao diện về trạng thái bình thường.
+    private void exitSelectionMode() {
+        selectionModeEnabled = false;
+        selectedHistoryIds.clear();
+        updateSelectionUi();
+        historyAdapter.notifyDataSetChanged();
+    }
+
+    // Cập nhật giao diện của vùng thao tác chọn nhiều như số lượng đã chọn và trạng thái nút.
+    private void updateSelectionUi() {
+        selectionActionsLayout.setVisibility(selectionModeEnabled ? View.VISIBLE : View.GONE);
+        multiSelectButton.setText(selectionModeEnabled ? R.string.history_multi_select_done : R.string.history_multi_select);
+
+        int selectedCount = selectedHistoryIds.size();
+        selectionCountText.setText(
+                selectedCount == 0
+                        ? getString(R.string.history_selection_count_zero)
+                        : getString(R.string.history_selection_count_format, selectedCount)
+        );
+
+        deleteSelectedButton.setEnabled(selectedCount > 0);
+        deleteSelectedButton.setAlpha(selectedCount > 0 ? 1f : 0.5f);
+        selectAllButton.setText(areAllVisibleItemsSelected() ? R.string.history_deselect_all : R.string.history_select_all);
+    }
+
+    // Đồng bộ lại danh sách id đã chọn với dữ liệu hiện có để tránh giữ các mục đã bị xóa.
+    private void syncSelectionWithCurrentData() {
+        if (selectedHistoryIds.isEmpty()) {
+            return;
+        }
+
+        Set<String> validIds = new HashSet<>();
+        for (DiagnosisHistoryItem historyItem : allHistoryItems) {
+            if (historyItem != null && !TextUtils.isEmpty(historyItem.id)) {
+                validIds.add(historyItem.id);
+            }
+        }
+        selectedHistoryIds.retainAll(validIds);
+    }
+
+    // Kiểm tra một mục lịch sử hiện có đang nằm trong danh sách được chọn hay chưa.
+    private boolean isHistoryItemSelected(@NonNull DiagnosisHistoryItem historyItem) {
+        return !TextUtils.isEmpty(historyItem.id) && selectedHistoryIds.contains(historyItem.id);
+    }
+
+    // Chọn hoặc bỏ chọn một mục lịch sử trong chế độ chọn nhiều rồi cập nhật lại giao diện.
+    private void toggleHistoryItemSelection(@NonNull DiagnosisHistoryItem historyItem) {
+        if (TextUtils.isEmpty(historyItem.id)) {
+            return;
+        }
+
+        if (selectedHistoryIds.contains(historyItem.id)) {
+            selectedHistoryIds.remove(historyItem.id);
+        } else {
+            selectedHistoryIds.add(historyItem.id);
+        }
+        updateSelectionUi();
+        historyAdapter.notifyDataSetChanged();
+    }
+
+    // Kiểm tra xem toàn bộ mục đang hiển thị theo bộ lọc hiện tại đã được chọn hết hay chưa.
+    private boolean areAllVisibleItemsSelected() {
+        if (visibleHistoryItems.isEmpty()) {
+            return false;
+        }
+
+        for (DiagnosisHistoryItem historyItem : visibleHistoryItems) {
+            if (historyItem == null || TextUtils.isEmpty(historyItem.id) || !selectedHistoryIds.contains(historyItem.id)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Chọn tất cả hoặc bỏ chọn tất cả các mục đang hiển thị trong danh sách đã được lọc.
+    private void toggleSelectAllVisibleItems() {
+        if (visibleHistoryItems.isEmpty()) {
+            return;
+        }
+
+        boolean allSelected = areAllVisibleItemsSelected();
+        for (DiagnosisHistoryItem historyItem : visibleHistoryItems) {
+            if (historyItem == null || TextUtils.isEmpty(historyItem.id)) {
+                continue;
+            }
+
+            if (allSelected) {
+                selectedHistoryIds.remove(historyItem.id);
+            } else {
+                selectedHistoryIds.add(historyItem.id);
+            }
+        }
+        updateSelectionUi();
+        historyAdapter.notifyDataSetChanged();
+    }
+
+    // Hiển thị hộp thoại xác nhận trước khi xóa đồng thời nhiều mục đã được chọn trong lịch sử.
+    private void confirmDeleteSelectedItems() {
+        int selectedCount = selectedHistoryIds.size();
+        if (selectedCount == 0) {
+            Toast.makeText(this, R.string.history_delete_selected_empty, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.history_delete_selected_title)
+                .setMessage(getString(R.string.history_delete_selected_message, selectedCount))
+                .setNegativeButton(R.string.history_delete_cancel, null)
+                .setPositiveButton(R.string.history_delete_confirm, (dialog, which) -> deleteSelectedHistoryItems())
+                .show();
+    }
+
+    // Xóa toàn bộ các mục đang được chọn khỏi bộ nhớ lưu trữ và làm mới danh sách đang hiển thị.
+    private void deleteSelectedHistoryItems() {
+        List<String> historyIdsToDelete = new ArrayList<>(selectedHistoryIds);
+        int removedCount = DiagnosisHistoryManager.removeHistoryItems(this, historyIdsToDelete);
+        if (removedCount <= 0) {
+            Toast.makeText(this, R.string.history_delete_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        removeHistoryItemsFromMemory(historyIdsToDelete);
+        exitSelectionMode();
+        applySelectedFilter();
+        Toast.makeText(this, getString(R.string.history_delete_selected_success, removedCount), Toast.LENGTH_SHORT).show();
+    }
+
+    // Hiển thị hộp thoại xác nhận trước khi xóa một mục chẩn đoán khỏi lịch sử đã lưu.
+    private void confirmDeleteHistoryItem(@NonNull DiagnosisHistoryItem historyItem) {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.history_delete_title)
+                .setMessage(R.string.history_delete_message)
+                .setNegativeButton(R.string.history_delete_cancel, null)
+                .setPositiveButton(R.string.history_delete_confirm, (dialog, which) -> deleteHistoryItem(historyItem))
+                .show();
+    }
+
+    // Xóa mục lịch sử khỏi bộ nhớ lưu trữ và cập nhật lại danh sách đang hiển thị trên màn hình.
+    private void deleteHistoryItem(@NonNull DiagnosisHistoryItem historyItem) {
+        boolean removed = DiagnosisHistoryManager.removeHistoryItem(this, historyItem.id);
+        if (!removed) {
+            Toast.makeText(this, R.string.history_delete_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        removeHistoryItemFromMemory(historyItem.id);
+        applySelectedFilter();
+        Toast.makeText(this, R.string.history_delete_success, Toast.LENGTH_SHORT).show();
+    }
+
+    // Loại bỏ mục vừa xóa khỏi danh sách gốc trong bộ nhớ để tránh phải tải lại toàn bộ dữ liệu.
+    private void removeHistoryItemFromMemory(String historyItemId) {
+        if (TextUtils.isEmpty(historyItemId)) {
+            return;
+        }
+
+        for (int index = allHistoryItems.size() - 1; index >= 0; index--) {
+            DiagnosisHistoryItem item = allHistoryItems.get(index);
+            if (item != null && historyItemId.equals(item.id)) {
+                allHistoryItems.remove(index);
+                break;
+            }
+        }
+    }
+
+    // Loại bỏ nhiều mục vừa xóa khỏi danh sách gốc trong bộ nhớ để giao diện cập nhật ngay lập tức.
+    private void removeHistoryItemsFromMemory(@NonNull List<String> historyItemIds) {
+        if (historyItemIds.isEmpty()) {
+            return;
+        }
+
+        Set<String> idSet = new HashSet<>(historyItemIds);
+        for (int index = allHistoryItems.size() - 1; index >= 0; index--) {
+            DiagnosisHistoryItem item = allHistoryItems.get(index);
+            if (item != null && idSet.contains(item.id)) {
+                allHistoryItems.remove(index);
+            }
+        }
+    }
+
+    // Nạp ảnh thumbnail từ đường dẫn đã lưu và hiển thị ảnh mặc định nếu không đọc được file.
+    private void bindThumbnail(@NonNull ImageView thumbnailImage, String imagePath) {
+        Bitmap thumbnailBitmap = loadThumbnailBitmap(imagePath);
+        if (thumbnailBitmap != null) {
+            thumbnailImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            thumbnailImage.setImageBitmap(thumbnailBitmap);
+            return;
+        }
+
+        thumbnailImage.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        thumbnailImage.setImageResource(android.R.drawable.ic_menu_report_image);
+    }
+
+    // Giải mã ảnh kích thước nhỏ để hiển thị trong danh sách lịch sử mà không tốn nhiều bộ nhớ.
+    private Bitmap loadThumbnailBitmap(String imagePath) {
+        if (TextUtils.isEmpty(imagePath)) {
+            return null;
+        }
+
+        try {
+            BitmapFactory.Options boundsOptions = new BitmapFactory.Options();
+            boundsOptions.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(imagePath, boundsOptions);
+
+            BitmapFactory.Options bitmapOptions = new BitmapFactory.Options();
+            bitmapOptions.inSampleSize = calculateInSampleSize(boundsOptions);
+            bitmapOptions.inPreferredConfig = Bitmap.Config.RGB_565;
+            Bitmap decodedBitmap = BitmapFactory.decodeFile(imagePath, bitmapOptions);
+            if (decodedBitmap == null) {
+                return null;
+            }
+
+            return applyExifOrientation(imagePath, decodedBitmap);
+        } catch (Exception exception) {
+            Log.e(TAG, "Unable to decode history thumbnail", exception);
+            return null;
+        }
+    }
+
+    // Xoay ảnh thumbnail theo thông tin EXIF để ảnh trong lịch sử hiển thị đúng chiều.
+    private Bitmap applyExifOrientation(String imagePath, Bitmap bitmap) {
+        try {
+            ExifInterface exifInterface = new ExifInterface(imagePath);
+            int orientation = exifInterface.getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL
+            );
+
+            Matrix matrix = new Matrix();
+            switch (orientation) {
+                case ExifInterface.ORIENTATION_ROTATE_90:
+                    matrix.postRotate(90f);
+                    break;
+                case ExifInterface.ORIENTATION_ROTATE_180:
+                    matrix.postRotate(180f);
+                    break;
+                case ExifInterface.ORIENTATION_ROTATE_270:
+                    matrix.postRotate(270f);
+                    break;
+                case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                    matrix.preScale(-1f, 1f);
+                    break;
+                case ExifInterface.ORIENTATION_FLIP_VERTICAL:
+                    matrix.preScale(1f, -1f);
+                    break;
+                case ExifInterface.ORIENTATION_TRANSPOSE:
+                    matrix.preScale(-1f, 1f);
+                    matrix.postRotate(270f);
+                    break;
+                case ExifInterface.ORIENTATION_TRANSVERSE:
+                    matrix.preScale(-1f, 1f);
+                    matrix.postRotate(90f);
+                    break;
+                case ExifInterface.ORIENTATION_NORMAL:
+                case ExifInterface.ORIENTATION_UNDEFINED:
+                default:
+                    return bitmap;
+            }
+
+            Bitmap rotatedBitmap = Bitmap.createBitmap(
+                    bitmap,
+                    0,
+                    0,
+                    bitmap.getWidth(),
+                    bitmap.getHeight(),
+                    matrix,
+                    true
+            );
+
+            if (rotatedBitmap != bitmap) {
+                bitmap.recycle();
+            }
+            return rotatedBitmap;
+        } catch (Exception exception) {
+            Log.e(TAG, "Unable to apply EXIF orientation to history thumbnail", exception);
+            return bitmap;
+        }
+    }
+
+    // Tính hệ số thu nhỏ phù hợp để ảnh danh sách hiển thị nhanh và tiết kiệm bộ nhớ hơn.
+    private int calculateInSampleSize(BitmapFactory.Options options) {
+        int height = options.outHeight;
+        int width = options.outWidth;
+        int inSampleSize = 1;
+
+        if (height > THUMBNAIL_REQUIRED_HEIGHT || width > THUMBNAIL_REQUIRED_WIDTH) {
+            int halfHeight = height / 2;
+            int halfWidth = width / 2;
+
+            while ((halfHeight / inSampleSize) >= THUMBNAIL_REQUIRED_HEIGHT && (halfWidth / inSampleSize) >= THUMBNAIL_REQUIRED_WIDTH) {
+                inSampleSize *= 2;
+            }
+        }
+
+        return Math.max(inSampleSize, 1);
     }
 
     // Chuyển plant type đã chuẩn hóa thành nhãn hiển thị thân thiện cho người dùng.
@@ -217,6 +614,16 @@ public class HistoryActivity extends AppCompatActivity {
             return getString(R.string.diagnosis_not_available);
         }
         return rawValue.replace("_", " ");
+    }
+
+    // Nếu người dùng đang ở chế độ chọn nhiều thì ưu tiên thoát chế độ này trước khi rời màn hình.
+    @Override
+    public void onBackPressed() {
+        if (selectionModeEnabled) {
+            exitSelectionMode();
+            return;
+        }
+        super.onBackPressed();
     }
 }
 
