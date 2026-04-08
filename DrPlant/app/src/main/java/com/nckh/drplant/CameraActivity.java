@@ -38,7 +38,7 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import static android.Manifest.*;
 
-import com.nckh.drplant.AiApi.DiagnosisApiClient;
+import com.nckh.drplant.AiUtils.OnnxDiagnosisEngine;
 import com.nckh.drplant.Models.DiagnosisResponse;
 import com.nckh.drplant.Utils.DiagnosisHelper;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -257,14 +257,17 @@ public class CameraActivity extends AppCompatActivity {
         });
     }
 
-    // Tải ảnh vừa chụp hoặc ảnh lấy từ thư viện lên API để nhận kết quả chẩn đoán.
+    // Phân tích ảnh vừa chụp hoặc ảnh lấy từ thư viện bằng model ONNX cục bộ để nhận kết quả chẩn đoán.
     private void uploadCapturedImage(@NonNull File imageFile) {
         setLoadingState(true);
         uploadLoadingText.setText(R.string.camera_uploading);
 
-        DiagnosisApiClient.diagnoseImage(imageFile, new DiagnosisApiClient.DiagnosisCallback() {
-            @Override
-            public void onSuccess(@NonNull DiagnosisResponse diagnosisResponse, @NonNull String rawJson) {
+        Thread diagnosisThread = new Thread(() -> {
+            try {
+                DiagnosisResponse diagnosisResponse = OnnxDiagnosisEngine
+                        .getInstance(getApplicationContext())
+                        .diagnoseImage(imageFile);
+
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) {
                         return;
@@ -273,24 +276,26 @@ public class CameraActivity extends AppCompatActivity {
                     setLoadingState(false);
                     DiagnosisHelper.launchDiagnosisActivity(CameraActivity.this, diagnosisResponse, imageFile.getAbsolutePath());
                 });
-            }
-
-            @Override
-            public void onFailure(@NonNull String message, Throwable throwable) {
+            } catch (Exception exception) {
+                Log.e(TAG, "Unable to diagnose image using local ONNX model", exception);
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) {
                         return;
                     }
 
                     setLoadingState(false);
+                    String errorMessage = exception.getMessage() == null || exception.getMessage().trim().isEmpty()
+                            ? "Không thể chạy model ONNX trên thiết bị này."
+                            : exception.getMessage();
                     Toast.makeText(
                             CameraActivity.this,
-                            getString(R.string.camera_diagnosis_failed, message),
+                            getString(R.string.camera_diagnosis_failed, errorMessage),
                             Toast.LENGTH_LONG
                     ).show();
                 });
             }
         });
+        diagnosisThread.start();
     }
 
     // Bật/tắt trạng thái loading và khóa các nút thao tác khi đang xử lý ảnh.

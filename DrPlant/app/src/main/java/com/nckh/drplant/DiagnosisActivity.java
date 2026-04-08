@@ -21,8 +21,6 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonSyntaxException;
 import com.nckh.drplant.Models.DiagnosisResponse;
 import com.nckh.drplant.Utils.DiagnosisHistoryManager;
 
@@ -33,9 +31,9 @@ import java.util.Locale;
 public class DiagnosisActivity extends AppCompatActivity {
 
     public static final String EXTRA_DIAGNOSIS_DATA = "diagnosis_data";
-    public static final String EXTRA_DIAGNOSIS_JSON = "diagnosis_json";
     public static final String EXTRA_CAPTURED_IMAGE_PATH = "captured_image_path";
     public static final String EXTRA_SAVE_TO_HISTORY = "save_to_history";
+    public static final String EXTRA_OPENED_FROM_HISTORY = "opened_from_history";
 
     private static final String TAG = "DiagnosisActivity";
     private static final String DEFAULT_ACCENT_COLOR = "#ef4444";
@@ -55,6 +53,7 @@ public class DiagnosisActivity extends AppCompatActivity {
     private LinearLayout biologicalLayout;
     private TextView emptyTitleText;
     private TextView emptyMessageText;
+    private TextView screenTitleText;
     private TextView messageText;
     private TextView resultReadyText;
     private ImageView capturedImageView;
@@ -91,6 +90,7 @@ public class DiagnosisActivity extends AppCompatActivity {
         historyButton.setOnClickListener(v -> startActivity(new android.content.Intent(this, HistoryActivity.class)));
 
         bindViews();
+        bindHeader(getIntent().getBooleanExtra(EXTRA_OPENED_FROM_HISTORY, false), historyButton);
 
         capturedImagePath = getIntent().getStringExtra(EXTRA_CAPTURED_IMAGE_PATH);
         diagnosisData = extractDiagnosisData();
@@ -112,6 +112,7 @@ public class DiagnosisActivity extends AppCompatActivity {
 
         emptyTitleText = findViewById(R.id.emptyTitleText);
         emptyMessageText = findViewById(R.id.emptyMessageText);
+        screenTitleText = findViewById(R.id.screenTitleText);
         messageText = findViewById(R.id.messageText);
         resultReadyText = findViewById(R.id.resultReadyText);
         capturedImageView = findViewById(R.id.capturedImageView);
@@ -130,21 +131,20 @@ public class DiagnosisActivity extends AppCompatActivity {
         biologicalDescriptionText = findViewById(R.id.biologicalDescriptionText);
     }
 
-    // Lấy dữ liệu chẩn đoán từ Intent, ưu tiên object rồi mới tới JSON thô.
+    // Điều chỉnh phần đầu màn hình để phân biệt đang xem kết quả mới hay xem lại chi tiết từ lịch sử.
+    private void bindHeader(boolean openedFromHistory, Button historyButton) {
+        screenTitleText.setText(openedFromHistory
+                ? R.string.diagnosis_history_detail_title
+                : R.string.diagnosis_activity_title);
+        historyButton.setVisibility(openedFromHistory ? View.GONE : View.VISIBLE);
+    }
+
+    // Lấy dữ liệu chẩn đoán từ Intent dưới dạng object đã được dựng sẵn từ model local.
     @Nullable
     private DiagnosisResponse extractDiagnosisData() {
         Serializable serializable = getIntent().getSerializableExtra(EXTRA_DIAGNOSIS_DATA);
         if (serializable instanceof DiagnosisResponse) {
             return (DiagnosisResponse) serializable;
-        }
-
-        String json = getIntent().getStringExtra(EXTRA_DIAGNOSIS_JSON);
-        if (!TextUtils.isEmpty(json)) {
-            try {
-                return new Gson().fromJson(json, DiagnosisResponse.class);
-            } catch (JsonSyntaxException exception) {
-                Log.e(TAG, "Failed to parse diagnosis JSON", exception);
-            }
         }
 
         return null;

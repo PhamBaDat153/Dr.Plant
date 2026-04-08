@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
 
-import com.google.gson.Gson;
 import com.nckh.drplant.DiagnosisActivity;
 import com.nckh.drplant.Models.DiagnosisResponse;
 
@@ -16,55 +15,35 @@ public class DiagnosisHelper {
         // Utility class
     }
 
-    /**
-     * Launch the DiagnosisActivity with the diagnosis data
-     * @param context The context from which to launch the activity
-     * @param jsonResponse The JSON response string
-     */
-    public static void launchDiagnosisActivity(Context context, String jsonResponse) {
-        launchDiagnosisActivity(context, jsonResponse, null, true);
-    }
-
-    public static void launchDiagnosisActivity(Context context, String jsonResponse, String imagePath) {
-        launchDiagnosisActivity(context, jsonResponse, imagePath, true);
-    }
-
-    public static void launchDiagnosisActivity(Context context, String jsonResponse, String imagePath, boolean saveToHistory) {
-        try {
-            Gson gson = new Gson();
-            DiagnosisResponse diagnosisData = gson.fromJson(jsonResponse, DiagnosisResponse.class);
-
-            Intent intent = new Intent(context, DiagnosisActivity.class);
-            intent.putExtra(DiagnosisActivity.EXTRA_DIAGNOSIS_JSON, jsonResponse);
-            intent.putExtra(DiagnosisActivity.EXTRA_DIAGNOSIS_DATA, diagnosisData);
-            intent.putExtra(DiagnosisActivity.EXTRA_CAPTURED_IMAGE_PATH, imagePath);
-            intent.putExtra(DiagnosisActivity.EXTRA_SAVE_TO_HISTORY, saveToHistory);
-            addNewTaskFlagIfNeeded(context, intent);
-            context.startActivity(intent);
-        } catch (Exception e) {
-            Log.e(TAG, "Unable to launch diagnosis activity from JSON", e);
-        }
-    }
-
-    /**
-     * Launch the DiagnosisActivity with a DiagnosisResponse object
-     * @param context The context from which to launch the activity
-     * @param diagnosisData The DiagnosisResponse object
-     */
+    // Mở màn hình chẩn đoán bằng dữ liệu object đã được tạo sẵn từ model local.
     public static void launchDiagnosisActivity(Context context, DiagnosisResponse diagnosisData) {
-        launchDiagnosisActivity(context, diagnosisData, null, true);
+        launchDiagnosisActivity(context, diagnosisData, null, true, false);
     }
 
     public static void launchDiagnosisActivity(Context context, DiagnosisResponse diagnosisData, String imagePath) {
-        launchDiagnosisActivity(context, diagnosisData, imagePath, true);
+        launchDiagnosisActivity(context, diagnosisData, imagePath, true, false);
     }
 
     public static void launchDiagnosisActivity(Context context, DiagnosisResponse diagnosisData, String imagePath, boolean saveToHistory) {
+        launchDiagnosisActivity(context, diagnosisData, imagePath, saveToHistory, false);
+    }
+
+    // Mở lại màn hình chi tiết chẩn đoán từ danh sách lịch sử mà không lưu trùng lịch sử lần nữa.
+    public static void launchDiagnosisActivityFromHistory(Context context, DiagnosisResponse diagnosisData, String imagePath) {
+        launchDiagnosisActivity(context, diagnosisData, imagePath, false, true);
+    }
+
+    private static void launchDiagnosisActivity(Context context,
+                                                DiagnosisResponse diagnosisData,
+                                                String imagePath,
+                                                boolean saveToHistory,
+                                                boolean openedFromHistory) {
         try {
             Intent intent = new Intent(context, DiagnosisActivity.class);
             intent.putExtra(DiagnosisActivity.EXTRA_DIAGNOSIS_DATA, diagnosisData);
             intent.putExtra(DiagnosisActivity.EXTRA_CAPTURED_IMAGE_PATH, imagePath);
             intent.putExtra(DiagnosisActivity.EXTRA_SAVE_TO_HISTORY, saveToHistory);
+            intent.putExtra(DiagnosisActivity.EXTRA_OPENED_FROM_HISTORY, openedFromHistory);
             addNewTaskFlagIfNeeded(context, intent);
             context.startActivity(intent);
         } catch (Exception e) {

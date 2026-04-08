@@ -1,5 +1,6 @@
 package com.nckh.drplant;
 
+import android.app.DatePickerDialog;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
@@ -28,11 +29,13 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
 import com.nckh.drplant.Models.DiagnosisHistoryItem;
+import com.nckh.drplant.Models.DiagnosisResponse;
 import com.nckh.drplant.Utils.DiagnosisHelper;
 import com.nckh.drplant.Utils.DiagnosisHistoryManager;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -48,16 +51,21 @@ public class HistoryActivity extends AppCompatActivity {
     private final List<DiagnosisHistoryItem> allHistoryItems = new ArrayList<>();
     private final List<DiagnosisHistoryItem> visibleHistoryItems = new ArrayList<>();
     private final Set<String> selectedHistoryIds = new HashSet<>();
+    private final SimpleDateFormat selectedDateFormat = new SimpleDateFormat("dd/MM/yyyy", Locale.getDefault());
 
     private RadioGroup filterGroup;
     private TextView emptyHistoryText;
+    private TextView selectedDateFilterText;
     private HistoryAdapter historyAdapter;
+    private Button pickDateButton;
+    private Button clearDateButton;
     private Button multiSelectButton;
     private View selectionActionsLayout;
     private TextView selectionCountText;
     private Button selectAllButton;
     private Button deleteSelectedButton;
     private boolean selectionModeEnabled;
+    private Long selectedDateMillis;
 
     // Khởi tạo màn hình lịch sử, ánh xạ view và gán sự kiện cho bộ lọc cùng danh sách.
     @Override
@@ -78,6 +86,9 @@ public class HistoryActivity extends AppCompatActivity {
         filterGroup = findViewById(R.id.filterGroup);
         ListView historyListView = findViewById(R.id.historyListView);
         emptyHistoryText = findViewById(R.id.emptyHistoryText);
+        selectedDateFilterText = findViewById(R.id.selectedDateFilterText);
+        pickDateButton = findViewById(R.id.pickDateButton);
+        clearDateButton = findViewById(R.id.clearDateButton);
         multiSelectButton = findViewById(R.id.multiSelectButton);
         selectionActionsLayout = findViewById(R.id.selectionActionsLayout);
         selectionCountText = findViewById(R.id.selectionCountText);
@@ -102,6 +113,8 @@ public class HistoryActivity extends AppCompatActivity {
         multiSelectButton.setOnClickListener(v -> toggleSelectionMode());
         selectAllButton.setOnClickListener(v -> toggleSelectAllVisibleItems());
         deleteSelectedButton.setOnClickListener(v -> confirmDeleteSelectedItems());
+        pickDateButton.setOnClickListener(v -> showDatePickerDialog());
+        clearDateButton.setOnClickListener(v -> clearDateFilter());
 
         filterGroup.setOnCheckedChangeListener((group, checkedId) -> {
             if (selectionModeEnabled) {
@@ -109,6 +122,7 @@ public class HistoryActivity extends AppCompatActivity {
             }
             applySelectedFilter();
         });
+        updateDateFilterUi();
         updateSelectionUi();
     }
 
@@ -126,22 +140,20 @@ public class HistoryActivity extends AppCompatActivity {
         applySelectedFilter();
     }
 
-    // Lọc danh sách theo lựa chọn hiện tại: tất cả, sầu riêng hoặc cà phê.
+    // Lọc danh sách theo lựa chọn hiện tại: loại cây và ngày đã chọn, sau đó cập nhật giao diện.
     private void applySelectedFilter() {
         String filter = DiagnosisHistoryManager.FILTER_ALL;
         int checkedId = filterGroup.getCheckedRadioButtonId();
         if (checkedId == R.id.filterDurianButton) {
             filter = DiagnosisHistoryManager.FILTER_DURIAN;
-            emptyHistoryText.setText(R.string.history_empty_durian);
         } else if (checkedId == R.id.filterCoffeeButton) {
             filter = DiagnosisHistoryManager.FILTER_COFFEE;
-            emptyHistoryText.setText(R.string.history_empty_coffee);
-        } else {
-            emptyHistoryText.setText(R.string.history_empty_all);
         }
 
         visibleHistoryItems.clear();
-        visibleHistoryItems.addAll(DiagnosisHistoryManager.filterHistory(allHistoryItems, filter));
+        visibleHistoryItems.addAll(DiagnosisHistoryManager.filterHistory(allHistoryItems, filter, selectedDateMillis));
+        updateEmptyStateText(filter);
+        updateDateFilterUi();
         syncSelectionWithCurrentData();
         updateSelectionUi();
         historyAdapter.notifyDataSetChanged();
@@ -166,17 +178,104 @@ public class HistoryActivity extends AppCompatActivity {
             return;
         }
 
-        DiagnosisHistoryItem historyItem = visibleHistoryItems.get(position);
-        if (historyItem == null || historyItem.diagnosisResponse == null) {
+        openHistoryItem(visibleHistoryItems.get(position));
+    }
+
+    // Mở chi tiết chẩn đoán từ dữ liệu đã lưu; nếu thiếu object gốc thì dựng lại từ thông tin lịch sử.
+    private void openHistoryItem(@NonNull DiagnosisHistoryItem historyItem) {
+        DiagnosisResponse diagnosisResponse = historyItem.diagnosisResponse;
+        if (diagnosisResponse == null) {
+            diagnosisResponse = DiagnosisHistoryManager.buildDiagnosisResponseFromHistory(historyItem);
+            historyItem.diagnosisResponse = diagnosisResponse;
+        }
+
+        if (diagnosisResponse == null) {
+            Toast.makeText(this, R.string.history_open_detail_failed, Toast.LENGTH_SHORT).show();
             return;
         }
 
-        DiagnosisHelper.launchDiagnosisActivity(
+        DiagnosisHelper.launchDiagnosisActivityFromHistory(this, diagnosisResponse, historyItem.imagePath);
+    }
+
+    // Mở DatePicker để người dùng chọn một ngày cụ thể cần lọc trong lịch sử chẩn đoán.
+    private void showDatePickerDialog() {
+        Calendar calendar = Calendar.getInstance();
+        if (selectedDateMillis != null) {
+            calendar.setTimeInMillis(selectedDateMillis);
+        }
+
+        DatePickerDialog datePickerDialog = new DatePickerDialog(
                 this,
-                historyItem.diagnosisResponse,
-                historyItem.imagePath,
-                false
+                (view, year, month, dayOfMonth) -> onDateFilterSelected(year, month, dayOfMonth),
+                calendar.get(Calendar.YEAR),
+                calendar.get(Calendar.MONTH),
+                calendar.get(Calendar.DAY_OF_MONTH)
         );
+        datePickerDialog.show();
+    }
+
+    // Lưu ngày đã chọn dưới dạng đầu ngày để việc lọc theo ngày luôn ổn định.
+    private void onDateFilterSelected(int year, int month, int dayOfMonth) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.set(Calendar.YEAR, year);
+        calendar.set(Calendar.MONTH, month);
+        calendar.set(Calendar.DAY_OF_MONTH, dayOfMonth);
+        calendar.set(Calendar.HOUR_OF_DAY, 0);
+        calendar.set(Calendar.MINUTE, 0);
+        calendar.set(Calendar.SECOND, 0);
+        calendar.set(Calendar.MILLISECOND, 0);
+        selectedDateMillis = calendar.getTimeInMillis();
+
+        if (selectionModeEnabled) {
+            exitSelectionMode();
+        }
+        applySelectedFilter();
+    }
+
+    // Xóa bộ lọc ngày hiện tại để hiển thị lại toàn bộ lịch sử theo loại cây đã chọn.
+    private void clearDateFilter() {
+        if (selectedDateMillis == null) {
+            return;
+        }
+
+        selectedDateMillis = null;
+        if (selectionModeEnabled) {
+            exitSelectionMode();
+        }
+        applySelectedFilter();
+    }
+
+    // Cập nhật phần mô tả ngày đang lọc để người dùng biết phạm vi dữ liệu đang xem.
+    private void updateDateFilterUi() {
+        if (selectedDateMillis == null) {
+            selectedDateFilterText.setText(R.string.history_date_filter_none);
+            clearDateButton.setVisibility(View.GONE);
+            return;
+        }
+
+        selectedDateFilterText.setText(getString(
+                R.string.history_date_filter_selected,
+                selectedDateFormat.format(new Date(selectedDateMillis))
+        ));
+        clearDateButton.setVisibility(View.VISIBLE);
+    }
+
+    // Cập nhật thông báo trống theo cả bộ lọc loại cây và bộ lọc ngày hiện tại.
+    private void updateEmptyStateText(@NonNull String plantFilter) {
+        if (selectedDateMillis != null) {
+            emptyHistoryText.setText(R.string.history_empty_filtered);
+            return;
+        }
+
+        if (DiagnosisHistoryManager.FILTER_DURIAN.equals(plantFilter)) {
+            emptyHistoryText.setText(R.string.history_empty_durian);
+            return;
+        }
+        if (DiagnosisHistoryManager.FILTER_COFFEE.equals(plantFilter)) {
+            emptyHistoryText.setText(R.string.history_empty_coffee);
+            return;
+        }
+        emptyHistoryText.setText(R.string.history_empty_all);
     }
 
     // Adapter dùng để hiển thị từng mục lịch sử chẩn đoán trong ListView.
@@ -243,6 +342,20 @@ public class HistoryActivity extends AppCompatActivity {
 
             boolean itemSelected = isHistoryItemSelected(historyItem);
             viewHolder.itemRoot.setBackgroundColor(itemSelected ? 0xFFDCEFFE : 0xFFF9FAFB);
+            viewHolder.itemRoot.setOnClickListener(v -> {
+                if (selectionModeEnabled) {
+                    toggleHistoryItemSelection(historyItem);
+                    return;
+                }
+                openHistoryItem(historyItem);
+            });
+            viewHolder.itemRoot.setOnLongClickListener(v -> {
+                if (!selectionModeEnabled) {
+                    enterSelectionMode();
+                }
+                toggleHistoryItemSelection(historyItem);
+                return true;
+            });
             viewHolder.selectionCheckBox.setVisibility(selectionModeEnabled ? View.VISIBLE : View.GONE);
             viewHolder.selectionCheckBox.setChecked(itemSelected);
             viewHolder.selectionCheckBox.setOnClickListener(v -> toggleHistoryItemSelection(historyItem));
